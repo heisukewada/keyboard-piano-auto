@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>キーボードピアノ＋自動演奏（音を伸ばせる版）</title>
+<style>
+body{
+    font-family:sans-serif;
+    margin:20px;
+    max-width:1000px;
+}
+h2{
+    margin-bottom:10px;
+}
+.layout{
+    display:inline-block;
+    text-align:left;
+    font-size:22px;
+    line-height:1.8;
+    background:#f5f5f5;
+    padding:15px;
+    border-radius:8px;
+    margin-bottom:20px;
+}
+#note{
+    margin:15px 0 20px;
+    font-size:28px;
+    font-weight:bold;
+    min-height:40px;
+}
+textarea{
+    width:100%;
+    height:260px;
+    font-size:20px;
+    line-height:1.7;
+    box-sizing:border-box;
+    padding:12px;
+}
+.controls{
+    margin:15px 0;
+}
+button{
+    font-size:18px;
+    padding:10px 18px;
+    margin-right:10px;
+}
+label{
+    font-size:18px;
+}
+input[type="number"]{
+    width:80px;
+    font-size:18px;
+    padding:4px;
+}
+.small{
+    color:#555;
+    margin-top:8px;
+    line-height:1.7;
+}
+</style>
+</head>
+<body>
+
+<h2>キーボードピアノ＋自動演奏（音を伸ばせる版）</h2>
+
+<div class="layout">
+A W S E D F T G Y H U J K O L P ;<br>
+C C# D D# E F F# G G# A A# B C5 C#5 D5 D#5 E5
+</div>
+
+<div id="note"></div>
+
+<h3>自動演奏する文字譜</h3>
+
+<textarea id="score">
+G H K L K ~ G K J ~ G J H ~
+D H J ~ K G H K L K K K K
+G J J J J G H ~  
+G H K L K K K K
+G J J J J G H ~ G F ~
+H J K ; L L L L H K
+K K H K L J H G ~
+G H K L K K K K
+G J J J J G H ~ G F ~
+G H K L K ~ G K J ~
+G J H ~ F H J ~
+G H K L K ~ G K J ~
+G J H ~ F H J ~
+G H K L K ~ ~
+</textarea>
+
+<div class="controls">
+    <button onclick="playScore()">再生</button>
+    <button onclick="stopScore()">停止</button>
+    <label>
+        1拍の長さ(ms):
+        <input type="number" id="speed" value="280" min="80" step="20">
+    </label>
+</div>
+
+<div class="small">
+・半角スペース区切りで読ませます。<br>
+・改行はそのままで構いません。<br>
+・休符は <b>_</b> または <b>-</b><br>
+・音を伸ばすときは <b>~</b> を使います。<br>
+例: <b>G G G P ~ ~</b> → 最後のPを3拍伸ばす
+</div>
+
+<script>
+const AudioContext = window.AudioContext || window.webkitAudioContext;
+const ctx = new AudioContext();
+
+const notes = {
+    'a':{f:261.63,n:'C'},
+    'w':{f:277.18,n:'C#'},
+    's':{f:293.66,n:'D'},
+    'e':{f:311.13,n:'D#'},
+    'd':{f:329.63,n:'E'},
+
+    'f':{f:349.23,n:'F'},
+    't':{f:369.99,n:'F#'},
+    'g':{f:392.00,n:'G'},
+    'y':{f:415.30,n:'G#'},
+    'h':{f:440.00,n:'A'},
+    'u':{f:466.16,n:'A#'},
+    'j':{f:493.88,n:'B'},
+
+    'k':{f:523.25,n:'C5'},
+    'o':{f:554.37,n:'C#5'},
+    'l':{f:587.33,n:'D5'},
+    'p':{f:622.25,n:'D#5'},
+    ';':{f:659.25,n:'E5'}
+};
+
+const active = {};
+let playTimer = null;
+let stopRequested = false;
+let autoPlayingKey = null;
+
+function startNote(key){
+    key = key.toLowerCase();
+    if(!notes[key]) return;
+    if(active[key]) return;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "triangle";
+    osc.frequency.value = notes[key].f;
+
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+
+    active[key] = {osc, gain};
+    document.getElementById("note").textContent =
+        key.toUpperCase() + "  (" + notes[key].n + ")";
+}
+
+function stopNote(key){
+    key = key.toLowerCase();
+    if(!active[key]) return;
+
+    const n = active[key];
+    const now = ctx.currentTime;
+
+    n.gain.gain.cancelScheduledValues(now);
+    n.gain.gain.setValueAtTime(Math.max(n.gain.gain.value, 0.0001), now);
+    n.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+    n.osc.stop(now + 0.1);
+
+    delete active[key];
+
+    if(Object.keys(active).length === 0){
+        document.getElementById("note").textContent = "";
+    }
+}
+
+function stopAllNotes(){
+    Object.keys(active).forEach(stopNote);
+    autoPlayingKey = null;
+}
+
+document.addEventListener("keydown", async e => {
+    if(ctx.state === "suspended"){
+        await ctx.resume();
+    }
+    const key = e.key.toLowerCase();
+    if(notes[key]){
+        startNote(key);
+    }
+});
+
+document.addEventListener("keyup", e => {
+    const key = e.key.toLowerCase();
+    if(notes[key]){
+        stopNote(key);
+    }
+});
+
+window.addEventListener("blur", stopAllNotes);
+
+function parseScore(text){
+    return text
+        .replace(/\r/g, "")
+        .split(/\s+/)
+        .filter(token => token.length > 0);
+}
+
+async function playScore(){
+    stopScore();
+
+    if(ctx.state === "suspended"){
+        await ctx.resume();
+    }
+
+    stopRequested = false;
+
+    const text = document.getElementById("score").value;
+    const tokens = parseScore(text);
+    const speed = parseInt(document.getElementById("speed").value, 10) || 280;
+
+    let i = 0;
+
+    function step(){
+        if(stopRequested || i >= tokens.length){
+            stopAllNotes();
+            return;
+        }
+
+        const token = tokens[i].toLowerCase();
+
+        // 伸ばし記号
+        if(token === "~"){
+            // 前の音(autoPlayingKey)をそのまま維持する
+            // 何もしないで次の拍へ
+            i++;
+            playTimer = setTimeout(step, speed);
+            return;
+        }
+
+        // 新しい音や休符が来たら、前の自動演奏音を止める
+        if(autoPlayingKey){
+            stopNote(autoPlayingKey);
+            autoPlayingKey = null;
+        }
+
+        // 休符
+        if(token === "_" || token === "-"){
+            i++;
+            playTimer = setTimeout(step, speed);
+            return;
+        }
+
+        // 通常の音
+        if(notes[token]){
+            startNote(token);
+            autoPlayingKey = token;
+        }
+
+        i++;
+        playTimer = setTimeout(step, speed);
+    }
+
+    step();
+}
+
+function stopScore(){
+    stopRequested = true;
+    if(playTimer){
+        clearTimeout(playTimer);
+        playTimer = null;
+    }
+    stopAllNotes();
+}
+</script>
+
+</body>
+</html>
